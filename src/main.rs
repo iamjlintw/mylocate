@@ -22,6 +22,7 @@ mylocate — macOS 上的即時檔案搜尋
 
 選項：
   -n <數量>             最多顯示幾筆（預設 50，0 為不限）
+  -V, --version         顯示版本
 
 daemon 在跑的話，查詢會自動走它；否則直接讀索引檔。
 ";
@@ -58,6 +59,7 @@ fn main() {
         }
         "-i" | "--interactive" => cmd_interactive(),
         "-h" | "--help" => print!("{USAGE}"),
+        "-V" | "--version" => println!("mylocate {}", env!("CARGO_PKG_VERSION")),
         _ => cmd_search(&args),
     }
 }

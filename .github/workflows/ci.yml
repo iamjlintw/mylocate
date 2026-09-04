@@ -39,8 +39,13 @@ jobs:
       - name: Clippy（警告視為錯誤）
         run: cargo clippy --all-targets -- -D warnings
 
+      - name: 單元測試
+        run: cargo test --locked
+
       - name: 建置（release）
         run: cargo build --release --locked
 
       - name: 冒煙測試
-        run: ./target/release/ml --help
+        run: |
+          ./target/release/ml --help
+          ./target/release/ml --version
