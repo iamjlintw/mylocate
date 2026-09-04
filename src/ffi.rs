@@ -94,8 +94,6 @@ pub fn build_attrlist_fast() -> Layout {
     }
 }
 
-
-
 // 每筆項目的欄位位移。以下排列是實際 dump 緩衝區核對出來的，有兩點跟
 // 「按 bit 由低到高排列」的直覺推導不同，都踩過坑：
 //
@@ -120,7 +118,6 @@ pub fn build_attrlist_fast() -> Layout {
 // 非對齊讀取（from_ne_bytes 走 byte slice）來取值。
 pub const OFF_NAME_REF: usize = 28;
 pub const OFF_OBJTYPE: usize = 36;
-
 
 /// 從 byte slice 非對齊讀取 u32。
 #[inline]

@@ -230,10 +230,7 @@ fn cmd_stats() {
     println!("根目錄　　：{}", String::from_utf8_lossy(idx.root()));
     println!("目錄數　　：{}", h.n_dirs);
     println!("檔案數　　：{}", h.n_files);
-    println!(
-        "建立時間　：{}",
-        chrono_like(h.scan_time)
-    );
+    println!("建立時間　：{}", chrono_like(h.scan_time));
     println!("FSEvents　：event_id={}", h.event_id);
     match daemon::query_daemon("I\t\t\n") {
         Some((_, tail)) => {

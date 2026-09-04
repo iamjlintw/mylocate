@@ -173,8 +173,7 @@ pub fn build(scan: &ScanResult, event_id: u64, dev_uuid: [u8; 16], scan_time: i6
             sorted_recs.len() * 12,
         );
     }
-    buf[at(file_names_off)..at(file_names_off) + sorted_names.len()]
-        .copy_from_slice(&sorted_names);
+    buf[at(file_names_off)..at(file_names_off) + sorted_names.len()].copy_from_slice(&sorted_names);
 
     buf
 }

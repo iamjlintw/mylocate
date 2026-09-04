@@ -218,12 +218,15 @@ pub fn scan(root: &str, threads: usize) -> std::io::Result<ScanResult> {
     })
 }
 
-/// 列舉單一目錄的直接內容，回傳 `(名稱, 是否為目錄, 是否為 symlink)`。
+/// 目錄項目：`(名稱, 是否為目錄, 是否為 symlink)`。
+pub type DirEntry = (Vec<u8>, bool, bool);
+
+/// 列舉單一目錄的直接內容。
 ///
 /// 供 FSEvents 增量更新使用：事件旗標會被合併（同一路徑可能同時帶著
 /// 建立/刪除/修改），無法據以推斷檔案的最終狀態，所以一律重新列舉該目錄，
 /// 拿實際內容跟索引做 diff。一次系統呼叫就能涵蓋這個目錄的所有變更。
-pub fn list_dir(path: &[u8]) -> std::io::Result<Vec<(Vec<u8>, bool, bool)>> {
+pub fn list_dir(path: &[u8]) -> std::io::Result<Vec<DirEntry>> {
     let cpath = to_cstring(path);
     let fd = unsafe { open(cpath.as_ptr(), O_RDONLY | O_DIRECTORY | libc::O_NOFOLLOW) };
     if fd < 0 {
@@ -332,7 +335,10 @@ impl<'a> Ctx<'a> {
     #[inline]
     fn alloc_id(&mut self) -> u32 {
         if self.id_cursor == self.id_end {
-            let base = self.shared.next_dir_id.fetch_add(ID_BATCH, Ordering::Relaxed);
+            let base = self
+                .shared
+                .next_dir_id
+                .fetch_add(ID_BATCH, Ordering::Relaxed);
             self.id_cursor = base;
             self.id_end = base + ID_BATCH;
         }

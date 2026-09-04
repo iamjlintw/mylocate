@@ -399,10 +399,9 @@ impl Live {
             _pad: 0,
         });
         let id = self.n_base_dirs() + (self.add_dir_nodes.len() - 1) as u32;
-        self.dead_add_dirs.bits.resize(
-            self.add_dir_nodes.len().div_ceil(64).max(1),
-            0,
-        );
+        self.dead_add_dirs
+            .bits
+            .resize(self.add_dir_nodes.len().div_ceil(64).max(1), 0);
         self.add_children.entry(parent).or_default().push(id);
         id
     }
@@ -496,8 +495,7 @@ impl Live {
 
             // 事件被丟棄：只有「這個子樹」的內容不可信，重掃它就好，
             // 不需要動到整份索引。
-            if flags
-                & (fse::EV_MUST_SCAN_SUBDIRS | fse::EV_USER_DROPPED | fse::EV_KERNEL_DROPPED)
+            if flags & (fse::EV_MUST_SCAN_SUBDIRS | fse::EV_USER_DROPPED | fse::EV_KERNEL_DROPPED)
                 != 0
             {
                 plan.rescan.push(path.clone());
@@ -577,7 +575,7 @@ impl Live {
     pub fn apply_listing(
         &mut self,
         dir_id: u32,
-        entries: Option<Vec<(Vec<u8>, bool, bool)>>,
+        entries: Option<Vec<crate::scan::DirEntry>>,
     ) -> Vec<Vec<u8>> {
         let entries = match entries {
             Some(v) => v,

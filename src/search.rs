@@ -141,14 +141,13 @@ pub fn search(idx: &Index, q: &Query, limit: usize, threads: usize) -> Hits {
             handles.push(s.spawn(move || {
                 let mut local: Vec<u32> = Vec::new();
                 let mut count = 0usize;
-                for i in start..end {
-                    let r = &recs[i];
+                for (i, r) in recs[start..end].iter().enumerate() {
                     let off = r.name_off as usize;
                     let name = &names[off..off + r.name_len as usize];
                     if matches(name, terms) {
                         count += 1;
                         if local.len() < limit {
-                            local.push(i as u32);
+                            local.push((start + i) as u32);
                         }
                     }
                 }

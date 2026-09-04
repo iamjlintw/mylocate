@@ -23,6 +23,9 @@ use std::sync::{Arc, Mutex};
 type Shared = Arc<Mutex<Arc<Live>>>;
 
 /// 取出目前的快照。刻意寫成獨立函式，強調鎖只用來 clone 指標。
+/// 一輪重新列舉的結果：`(目錄 id, 路徑, 列舉內容)`。目錄已消失時為 `None`。
+type Refresh = (u32, Vec<u8>, Option<Vec<crate::scan::DirEntry>>);
+
 fn snapshot(shared: &Shared) -> Arc<Live> {
     shared.lock().unwrap().clone()
 }
@@ -73,7 +76,11 @@ pub fn run(root: &str) -> std::io::Result<()> {
     let live: Shared = Arc::new(Mutex::new(Arc::new(live_init)));
     {
         let s = snapshot(&live);
-        eprintln!("索引就緒：{} 個目錄 / {} 個檔案", s.total_dirs(), s.total_files());
+        eprintln!(
+            "索引就緒：{} 個目錄 / {} 個檔案",
+            s.total_dirs(),
+            s.total_files()
+        );
     }
 
     // --- FSEvents 監看執行緒 ---
@@ -88,8 +95,7 @@ pub fn run(root: &str) -> std::io::Result<()> {
     let root_owned = root.to_string();
     std::thread::spawn(move || {
         for batch in rx {
-            let items: Vec<(Vec<u8>, u32)> =
-                batch.into_iter().map(|e| (e.path, e.flags)).collect();
+            let items: Vec<(Vec<u8>, u32)> = batch.into_iter().map(|e| (e.path, e.flags)).collect();
 
             // 重放離線期間的變更時，索引會有一小段追不上的時間；用哨兵事件
             // 明確告訴使用者何時真正同步完成，免得誤以為新檔案沒被索引到。
@@ -126,7 +132,7 @@ pub fn run(root: &str) -> std::io::Result<()> {
                     .collect()
             };
 
-            let listings: Vec<(u32, Vec<u8>, Option<Vec<(Vec<u8>, bool, bool)>>)> = plan
+            let listings: Vec<Refresh> = plan
                 .refresh
                 .into_iter()
                 .map(|(id, path)| {

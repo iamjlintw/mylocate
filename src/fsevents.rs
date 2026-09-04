@@ -209,7 +209,7 @@ pub fn watch_forever(paths: &[&str], since: u64, latency: f64, tx: Sender<Vec<Ev
             .collect();
         let array = CFArrayCreate(
             std::ptr::null(),
-            cf_paths.as_ptr() as *const *const c_void,
+            cf_paths.as_ptr(),
             cf_paths.len() as CFIndex,
             &kCFTypeArrayCallBacks as *const c_void,
         );
