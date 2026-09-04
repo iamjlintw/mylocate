@@ -1,6 +1,6 @@
 # mylocate
 
-[繁體中文](README.md) | **简体中文** | [English](README.en.md)
+[繁體中文](README.zh-TW.md) | **简体中文** | [English](README.md)
 
 [![CI](https://github.com/iamjlintw/mylocate/actions/workflows/ci.yml/badge.svg)](https://github.com/iamjlintw/mylocate/actions/workflows/ci.yml)
 
@@ -49,6 +49,7 @@ ml -i                    # 交互模式，输入即时筛选（需要 fzf）
 ml stats                 # 索引与 daemon 状态
 ml index [路径]          # 重建索引（默认 $HOME）
 ml daemon [路径]         # 前台启动常驻服务
+ml -V                    # 显示版本
 ```
 
 daemon 在跑的话查询会自动走它；没跑就直接读索引文件（慢一些，约 50 ms）。

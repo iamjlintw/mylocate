@@ -1,6 +1,6 @@
 # mylocate
 
-[繁體中文](README.md) | [简体中文](README.zh-CN.md) | **English**
+[繁體中文](README.zh-TW.md) | [简体中文](README.zh-CN.md) | **English**
 
 [![CI](https://github.com/iamjlintw/mylocate/actions/workflows/ci.yml/badge.svg)](https://github.com/iamjlintw/mylocate/actions/workflows/ci.yml)
 
@@ -49,6 +49,7 @@ ml -i                    # interactive mode, filters as you type (needs fzf)
 ml stats                 # index and daemon status
 ml index [path]          # rebuild the index (defaults to $HOME)
 ml daemon [path]         # run the resident service in the foreground
+ml -V                    # print the version
 ```
 
 If the daemon is running, queries go through it automatically; otherwise `ml` reads the index file directly (slower, around 50 ms).
