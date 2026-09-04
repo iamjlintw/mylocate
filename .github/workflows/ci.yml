@@ -1,0 +1,46 @@
+# 本專案只支援 macOS（依賴 FSEvents 與 getattrlistbulk），因此只在 macOS runner 上驗證。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: 格式、Clippy 與建置
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 顯示 toolchain 版本
+        run: |
+          rustc --version
+          cargo --version
+
+      - name: 快取 cargo 與建置產物
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: 格式檢查
+        run: cargo fmt --check
+
+      - name: Clippy（警告視為錯誤）
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: 建置（release）
+        run: cargo build --release --locked
+
+      - name: 冒煙測試
+        run: ./target/release/ml --help

@@ -1,5 +1,7 @@
 # mylocate
 
+[![CI](https://github.com/iamjlintw/mylocate/actions/workflows/ci.yml/badge.svg)](https://github.com/iamjlintw/mylocate/actions/workflows/ci.yml)
+
 macOS 上的即時檔案搜尋，目標是做到跟 Windows 的 [Everything](https://www.voidtools.com/) 一樣的體感：**打字即出結果、索引永遠是新的**。
 
 用 Rust 寫成，除了 `memchr`（SIMD 字串搜尋）之外沒有其他相依。
