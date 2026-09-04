@@ -1,5 +1,7 @@
 # mylocate
 
+**繁體中文** | [简体中文](README.zh-CN.md) | [English](README.en.md)
+
 [![CI](https://github.com/iamjlintw/mylocate/actions/workflows/ci.yml/badge.svg)](https://github.com/iamjlintw/mylocate/actions/workflows/ci.yml)
 
 macOS 上的即時檔案搜尋，目標是做到跟 Windows 的 [Everything](https://www.voidtools.com/) 一樣的體感：**打字即出結果、索引永遠是新的**。
@@ -27,7 +29,7 @@ macOS 上的即時檔案搜尋，目標是做到跟 Windows 的 [Everything](htt
 - Xcode Command Line Tools（`xcode-select --install`）
 - [fzf](https://github.com/junegunn/fzf)：選配，只有互動模式 `ml -i` 會用到
 
-首次建立索引與 daemon 監看檔案變動需要讀取 `$HOME` 底下所有檔案。若掃描結果明顯偏少，到「系統設定 → 隱私權與安全性 → 完整取用磁碟」把終端機（或 `ml`）加進去。
+首次建立索引與 daemon 監看檔案變動需要讀取 `$HOME` 底下所有檔案。若掃描結果明顯偏少，到「系統設定 → 隱私權與安全性 → 完全取用磁碟」把終端機（或 `ml`）加進去。
 
 ## 安裝
 
@@ -65,8 +67,8 @@ rm -rf ~/Library/Caches/mylocate                                        # 索引
 ```
                   ┌─ 全量掃描（僅首次，16 秒）──────┐
    APFS ─────────►│ getattrlistbulk + openat 遞迴   │──► 索引檔（105 MB）
-                  └────────────────────────────────┘         │
-                                                             │ mmap（零解析）
+                  └─────────────────────────────────┘         │
+                                                              │ mmap（零解析）
    檔案變動 ──► FSEvents ──► 重新列舉該目錄 + diff ──► delta ─┴──► 查詢 6.6 ms
 ```
 
