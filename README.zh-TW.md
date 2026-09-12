@@ -44,7 +44,15 @@ macOS 上的即時檔案搜尋，目標是做到跟 Windows 的 [Everything](htt
 ```sh
 ml webpack.config        # 搜尋（大小寫不敏感）
 ml webpack config        # 多個關鍵字為 AND
-ml -n 0 README           # 不限筆數（預設 50）
+ml tool/mylocate README  # 含斜線的關鍵字改比對完整路徑，用來縮小範圍
+ml '*.pdf'               # 萬用字元，整段對齊完整路徑
+ml "$PWD/*.pdf"          # 當前目錄樹底下的所有 pdf
+ml -w codes tool         # 所有關鍵字都比對完整路徑
+ml -b '*.pdf'            # 反過來，所有關鍵字都只比對檔名
+ml -t d node_modules     # 只要目錄（-t f 只要檔案）
+ml -c README             # 只印出命中數量
+ml -0 README | xargs -0  # 以 NUL 分隔，檔名含換行時才安全
+ml -n 0 README           # 不限筆數（預設 50，-l 同義）
 ml -i                    # 互動模式，打字即時篩選（需要 fzf）
 ml stats                 # 索引與 daemon 狀態
 ml index [路徑]          # 重建索引（預設 $HOME）
@@ -53,6 +61,22 @@ ml -V                    # 顯示版本
 ```
 
 daemon 在跑的話查詢會自動走它；沒跑就直接讀索引檔（慢一些，約 50 ms）。
+
+## 與 locate / plocate 的差異
+
+旗標盡量沿用 locate 的拼法（`-b`、`-w`、`-0`、`-c`、`-i`、`-l`），萬用字元的
+規則也一致：關鍵字含 `*`、`?`、`[` 就整段對齊完整路徑，`*` 會跨過斜線。
+
+但有三個預設值刻意相反，因為 mylocate 對齊的是 Everything 的手感：
+
+| | mylocate | locate / plocate |
+|---|---|---|
+| 預設比對對象 | 檔名（`-w` 可改成完整路徑） | 完整路徑（`-b` 可改成檔名） |
+| 多個關鍵字 | AND | OR（`-A` 才是 AND） |
+| 大小寫 | 一律不敏感 | 預設敏感（`-i` 才不敏感） |
+
+`-i` 收下但不做事，只是為了讓從 locate 過來的人不會被擋。索引新鮮度也不同：
+locate 系列靠排程跑 `updatedb`，多數發行版一天一次；mylocate 靠 FSEvents 即時更新。
 
 ## 解除安裝
 
@@ -110,6 +134,11 @@ Everything 官方說法是「optimized multi-threaded strstr on every single fil
 
 - 索引範圍是單一磁碟區（掃描時會擋掉跨 volume 的遞迴），外接碟不會被包含。
 - 不索引檔案內容，只搜檔名 —— 要搜內容請用 `rg`。
+- 結果的顯示順序是目錄先、檔案後，`-n` 的配額也由目錄先取。daemon 起停不會
+  改變任何一道指令的輸出。
+- 萬用字元的速度取決於樣式**結尾**。以字面結尾的（`*.pdf`）會拿 `.pdf` 當
+  memmem 的錨點，跟一般查詢一樣快；以萬用字元結尾的（`*/keep/*`、`*.pdf*`）
+  沒有錨點可用，只能逐筆掃並組出完整路徑，大約慢一個數量級。
 - 不存檔案大小與修改時間：那兩個欄位在 inode record 裡，索取它們會讓核心對每個檔案多做一次 B-tree 查詢。搜尋結果通常只看幾十筆，需要時對那幾筆補一次 `stat` 更划算。
 - 事件溢位只會重掃受影響的子樹；只有根目錄被搬走或事件 id 回繞才會整份重建。delta 累積超過 20 萬筆時也會重建，期間查詢仍正常服務。
 - 索引檔自己放在監看範圍內，daemon 會忽略它的事件 —— 否則重建時寫入的上百 MB 會回頭觸發自己，形成「重建→產生事件→再重建」的迴圈（實測 60 秒內重建了 7 次）。

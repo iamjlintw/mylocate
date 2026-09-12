@@ -44,7 +44,15 @@ The script builds the binary, installs `ml` into `~/.local/bin`, creates the fir
 ```sh
 ml webpack.config        # search (case-insensitive)
 ml webpack config        # multiple keywords are ANDed
-ml -n 0 README           # no result limit (default 50)
+ml tool/mylocate README  # a keyword with a slash matches the full path
+ml '*.pdf'               # globbing, anchored against the whole path
+ml "$PWD/*.pdf"          # every pdf under the current directory
+ml -w codes tool         # match every keyword against the full path
+ml -b '*.pdf'            # the opposite: match basenames only
+ml -t d node_modules     # directories only (-t f for files only)
+ml -c README             # print the number of matches only
+ml -0 README | xargs -0  # NUL-separated, safe for newlines in filenames
+ml -n 0 README           # no result limit (default 50, -l is a synonym)
 ml -i                    # interactive mode, filters as you type (needs fzf)
 ml stats                 # index and daemon status
 ml index [path]          # rebuild the index (defaults to $HOME)
@@ -53,6 +61,24 @@ ml -V                    # print the version
 ```
 
 If the daemon is running, queries go through it automatically; otherwise `ml` reads the index file directly (slower, around 50 ms).
+
+## Differences from locate / plocate
+
+Flag spellings follow locate where they fit (`-b`, `-w`, `-0`, `-c`, `-i`, `-l`),
+and globbing works the same way: a keyword containing `*`, `?` or `[` is matched
+against the whole path, anchored, with `*` crossing slashes.
+
+Three defaults are deliberately the opposite, because mylocate follows Everything:
+
+| | mylocate | locate / plocate |
+|---|---|---|
+| Default target | basename (`-w` for the whole path) | whole path (`-b` for basenames) |
+| Multiple keywords | AND | OR (`-A` for AND) |
+| Case | always insensitive | sensitive by default (`-i` to disable) |
+
+`-i` is accepted and does nothing, so muscle memory from locate still works.
+Freshness differs too: locate relies on a scheduled `updatedb`, typically daily,
+while mylocate stays current through FSEvents.
 
 ## Uninstall
 
@@ -110,6 +136,12 @@ The one optimization that worked was fixing a thundering herd: the scanner used 
 
 - The index covers a single volume (recursion across volume boundaries is blocked during the scan), so external drives are not included.
 - File contents are not indexed, only filenames — use `rg` to search contents.
+- Directories are listed before files, and they take the `-n` budget first.
+  Starting or stopping the daemon never changes what a command prints.
+- Glob speed depends on how the pattern **ends**. Patterns ending in a literal
+  (`*.pdf`) use that literal as the memmem anchor and run as fast as a plain
+  query; patterns ending in a wildcard (`*/keep/*`, `*.pdf*`) have no anchor and
+  fall back to a per-record scan that builds full paths, roughly 10x slower.
 - File size and modification time are not stored: both fields live in the inode record, and requesting them costs the kernel an extra B-tree lookup per file. Results are usually only scanned a few dozen at a time, so running `stat` on just those few when needed is the better trade.
 - Event overflow only triggers a rescan of the affected subtree; a full rebuild happens only if the root is moved away or the event id wraps. A rebuild also runs once the delta exceeds 200,000 entries, and queries continue to be served throughout.
 - The index file lives inside the watched tree, so the daemon ignores its own events — otherwise the hundreds of MB written during a rebuild would trigger another rebuild, producing a rebuild→event→rebuild loop (measured: 7 rebuilds within 60 seconds).

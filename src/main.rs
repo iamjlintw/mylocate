@@ -20,8 +20,19 @@ mylocate — macOS 上的即時檔案搜尋
   ml -i                 互動模式（需要 fzf，打字即時篩選）
   ml stats              顯示索引與 daemon 狀態
 
+關鍵字：
+  一般字串              比對檔名的任何位置
+  含 /                  比對完整路徑
+  含 * ? [              萬用字元，整段對齊完整路徑，例如 ml '$PWD/*.pdf'
+
 選項：
-  -n <數量>             最多顯示幾筆（預設 50，0 為不限）
+  -n, -l <數量>         最多顯示幾筆（預設 50，0 為不限）
+  -t d | -t f           只要目錄／只要檔案
+  -b                    所有關鍵字都只比對檔名
+  -w, --path            所有關鍵字都比對完整路徑
+  -0                    結果以 NUL 分隔（檔名含換行時才安全）
+  -c                    只印出命中數量
+  -i                    不分大小寫（本來就是預設，收下以相容 locate）
   -V, --version         顯示版本
 
 daemon 在跑的話，查詢會自動走它；否則直接讀索引檔。
@@ -234,7 +245,7 @@ fn cmd_stats() {
     println!("檔案數　　：{}", h.n_files);
     println!("建立時間　：{}", chrono_like(h.scan_time));
     println!("FSEvents　：event_id={}", h.event_id);
-    match daemon::query_daemon("I\t\t\n") {
+    match daemon::query_daemon("I\t\t\n", b'\n') {
         Some((_, tail)) => {
             let v: Vec<&str> = tail.split('\t').collect();
             println!(
@@ -262,19 +273,56 @@ fn chrono_like(ts: i64) -> String {
 
 fn cmd_search(args: &[String]) {
     let mut limit = 50usize;
+    let mut whole_path = false;
+    let mut basename = false;
+    let mut type_filter: Option<search::TypeFilter> = None;
+    let mut sep = b'\n';
+    let mut count_only = false;
     let mut terms: Vec<String> = Vec::new();
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "-n" => {
-                if let Some(v) = args.get(i + 1).and_then(|s| s.parse::<usize>().ok()) {
+            // 解析失敗一律報錯離開。先前是靜默略過，結果 `ml -n abc README`
+            // 會把 abc 當成關鍵字去查「abc README」，回 0 筆卻不說為什麼。
+            // -l 是 locate 的拼法，mlocate 兩個都收，這裡跟進。
+            "-n" | "-l" => match args.get(i + 1).map(|s| s.parse::<usize>()) {
+                Some(Ok(v)) => {
                     limit = if v == 0 { usize::MAX } else { v };
                     i += 1;
                 }
-            }
+                _ => {
+                    eprintln!("{} 後面要接一個數字（0 表示不限筆數）", args[i]);
+                    std::process::exit(2);
+                }
+            },
+            "-t" => match args.get(i + 1).map(|s| s.as_str()) {
+                Some("d") => {
+                    type_filter = Some(search::TypeFilter::Dirs);
+                    i += 1;
+                }
+                Some("f") => {
+                    type_filter = Some(search::TypeFilter::Files);
+                    i += 1;
+                }
+                _ => {
+                    eprintln!("-t 只接受 d（只要目錄）或 f（只要檔案）");
+                    std::process::exit(2);
+                }
+            },
+            "-w" | "--path" | "--wholename" => whole_path = true,
+            "-b" | "--basename" => basename = true,
+            "-0" | "--null" => sep = 0,
+            "-c" | "--count" => count_only = true,
+            // locate 預設區分大小寫所以有這個旗標；ml 一律不分，收下當無動作，
+            // 讓從 locate 過來的人不會因為多打一個字就被擋。
+            "-i" | "--ignore-case" => {}
             other => terms.push(other.to_string()),
         }
         i += 1;
+    }
+    if whole_path && basename {
+        eprintln!("-w 與 -b 互斥：一個要比對完整路徑，一個只比對檔名");
+        std::process::exit(2);
     }
     if terms.is_empty() {
         print!("{USAGE}");
@@ -282,45 +330,97 @@ fn cmd_search(args: &[String]) {
     }
 
     let query = terms.join(" ");
+    let opts = search::Options {
+        whole_path,
+        basename,
+        type_filter,
+    };
+    // 只要數量的話不必把結果搬回來，但 total 不受 limit 影響，仍然準確。
+    let effective_limit = if count_only { 1 } else { limit };
+
+    let mut flags = String::new();
+    if whole_path {
+        flags.push('p');
+    }
+    if basename {
+        flags.push('b');
+    }
+    if sep == 0 {
+        flags.push('0');
+    }
+    match type_filter {
+        Some(search::TypeFilter::Dirs) => flags.push('d'),
+        Some(search::TypeFilter::Files) => flags.push('f'),
+        _ => {}
+    }
 
     // daemon 在跑就交給它：索引已在記憶體，省掉每次 mmap 上百 MB 的冷啟動。
-    let n = if limit == usize::MAX { 0 } else { limit };
-    if let Some((lines, tail)) = daemon::query_daemon(&format!("S\t{n}\t{query}\n")) {
-        let stdout = std::io::stdout();
-        let mut out = std::io::BufWriter::new(stdout.lock());
-        for l in lines.iter() {
-            let _ = writeln!(out, "{l}");
+    // 先確認它聽得懂帶旗標的查詢 —— 舊版 daemon 會忽略旗標，寧可退回索引檔
+    // 慢一點，也不要默默給出不符合 --path / -t / -0 的結果。
+    let n = if effective_limit == usize::MAX {
+        0
+    } else {
+        effective_limit
+    };
+    let proto = daemon::query_daemon("V\n", b'\n')
+        .and_then(|(_, tail)| tail.split('\t').next().and_then(|v| v.parse::<u32>().ok()));
+    match proto {
+        Some(v) if v >= daemon::PROTO_VERSION => {
+            if let Some((items, tail)) =
+                daemon::query_daemon(&format!("Q\t{n}\t{flags}\t{query}\n"), sep)
+            {
+                let mut t = tail.split('\t');
+                let total: usize = t.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+                let us: f64 = t.next().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+                if count_only {
+                    println!("{total}");
+                    return;
+                }
+                let stdout = std::io::stdout();
+                let mut out = std::io::BufWriter::new(stdout.lock());
+                for item in items.iter() {
+                    let _ = out.write_all(item);
+                    let _ = out.write_all(&[sep]);
+                }
+                let _ = out.flush();
+                eprintln!(
+                    "── {} 筆結果（顯示 {}）· {:.2} ms · daemon",
+                    total,
+                    items.len(),
+                    us / 1000.0
+                );
+                return;
+            }
         }
-        let _ = out.flush();
-        let mut t = tail.split('\t');
-        let total: usize = t.next().and_then(|v| v.parse().ok()).unwrap_or(0);
-        let us: f64 = t.next().and_then(|v| v.parse().ok()).unwrap_or(0.0);
-        eprintln!(
-            "── {} 筆結果（顯示 {}）· {:.2} ms · daemon",
-            total,
-            lines.len(),
-            us / 1000.0
-        );
-        return;
+        Some(_) => {
+            eprintln!("daemon 的協定版本較舊，改用索引檔查詢（重啟 daemon 可恢復）");
+        }
+        None => {}
     }
 
     let idx = open_index();
-    let q = search::Query::parse(&query);
+    let q = search::Query::parse_opts(&query, opts);
 
     let t0 = Instant::now();
-    let hits = search::search(&idx, &q, limit, 0);
+    let hits = search::search(&idx, &q, effective_limit, 0);
     let elapsed = t0.elapsed();
+
+    if count_only {
+        println!("{}", hits.total);
+        return;
+    }
 
     // 大量結果時走 BufWriter，避免每行一次 write syscall 主導了總時間。
     let stdout = std::io::stdout();
     let mut out = std::io::BufWriter::new(stdout.lock());
     for &d in hits.dirs.iter() {
         let _ = out.write_all(&idx.dir_path(d));
-        let _ = out.write_all(b"/\n");
+        let _ = out.write_all(b"/");
+        let _ = out.write_all(&[sep]);
     }
     for &f in hits.files.iter() {
         let _ = out.write_all(&idx.file_path(f as usize));
-        let _ = out.write_all(b"\n");
+        let _ = out.write_all(&[sep]);
     }
     let _ = out.flush();
 

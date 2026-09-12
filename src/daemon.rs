@@ -10,8 +10,8 @@
 use crate::fsevents;
 use crate::index;
 use crate::live::Live;
-use crate::search::Query;
-use std::io::{BufRead, BufReader, Write};
+use crate::search::{Options, Query, TypeFilter};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -32,6 +32,11 @@ fn snapshot(shared: &Shared) -> Arc<Live> {
 
 /// delta 累積超過這個量就重建快照，避免搜尋時要附帶掃描的 delta 愈拖愈長。
 const COMPACT_THRESHOLD: usize = 200_000;
+
+/// socket 協定版本。客戶端先問 `V`，確認 daemon 聽得懂 `Q`（帶旗標的查詢）
+/// 之後才送。舊版 daemon 會把 `V` 當成未知指令回 "0\t0"，客戶端讀到 0 就退回
+/// 直接讀索引檔 —— 免得新旗標被舊 daemon 默默忽略，給出不符合預期的結果。
+pub const PROTO_VERSION: u32 = 2;
 
 pub fn socket_path() -> PathBuf {
     index::default_path().with_file_name("daemon.sock")
@@ -249,13 +254,48 @@ fn handle_client(stream: UnixStream, live: Shared) -> std::io::Result<()> {
     }
 
     let mut out = std::io::BufWriter::new(stream);
-    let mut parts = line.trim_end_matches('\n').splitn(3, '\t');
-    let cmd = parts.next().unwrap_or("");
+    let line = line.trim_end_matches('\n');
+    // 先只切出指令，其餘欄位由各指令自行解析 —— 不同指令的欄位數不同，
+    // 統一用一個 splitn 會讓查詢字串在欄位邊界上被切掉。
+    let (cmd, rest) = line.split_once('\t').unwrap_or((line, ""));
     match cmd {
-        "S" => {
-            let limit: usize = parts.next().and_then(|s| s.parse().ok()).unwrap_or(50);
+        // 協定版本。舊版 daemon 不認得這個指令，會走 `_` 分支回 "0\t0"，
+        // 客戶端讀到版本 0 就知道對面是舊的，改走直接讀索引檔的路徑。
+        "V" => {
+            writeln!(out, "{}{}", EOT as char, PROTO_VERSION)?;
+        }
+        // S 是舊協定：只有 limit 與查詢字串，沿用預設的過濾條件。
+        // Q 多帶一個旗標欄位，承載 --path 與 -t。
+        "S" | "Q" => {
+            let (limit_s, flags, query) = if cmd == "Q" {
+                let mut p = rest.splitn(3, '\t');
+                let l = p.next().unwrap_or("");
+                let f = p.next().unwrap_or("");
+                (l, f, p.next().unwrap_or(""))
+            } else {
+                let mut p = rest.splitn(2, '\t');
+                let l = p.next().unwrap_or("");
+                (l, "", p.next().unwrap_or(""))
+            };
+            let limit: usize = limit_s.parse().unwrap_or(50);
             let limit = if limit == 0 { usize::MAX } else { limit };
-            let q = Query::parse(parts.next().unwrap_or(""));
+            let q = Query::parse_opts(
+                query,
+                Options {
+                    whole_path: flags.contains('p'),
+                    basename: flags.contains('b'),
+                    type_filter: if flags.contains('d') {
+                        Some(TypeFilter::Dirs)
+                    } else if flags.contains('f') {
+                        Some(TypeFilter::Files)
+                    } else {
+                        None
+                    },
+                },
+            );
+            // 結果分隔符。檔名可以含換行，所以 -0 要求以 NUL 分隔時，
+            // 連 socket 上的傳輸也必須跟著改，否則客戶端照樣會切錯。
+            let sep: u8 = if flags.contains('0') { 0 } else { b'\n' };
 
             let t0 = std::time::Instant::now();
             let g = snapshot(&live);
@@ -264,7 +304,7 @@ fn handle_client(stream: UnixStream, live: Shared) -> std::io::Result<()> {
 
             for h in hits.iter() {
                 out.write_all(&g.path_of(*h))?;
-                out.write_all(b"\n")?;
+                out.write_all(&[sep])?;
             }
             writeln!(out, "{}{}\t{}", EOT as char, total, us)?;
         }
@@ -289,7 +329,7 @@ fn handle_client(stream: UnixStream, live: Shared) -> std::io::Result<()> {
 
 /// 客戶端：把查詢交給 daemon。daemon 沒在跑就回傳 None，讓呼叫端自行退回
 /// 直接讀索引檔的路徑 —— 沒裝 daemon 的人也要能正常使用。
-pub fn query_daemon(req: &str) -> Option<(Vec<String>, String)> {
+pub fn query_daemon(req: &str, sep: u8) -> Option<(Vec<Vec<u8>>, String)> {
     let sock = socket_path();
     if !Path::new(&sock).exists() {
         return None;
@@ -298,16 +338,16 @@ pub fn query_daemon(req: &str) -> Option<(Vec<String>, String)> {
     s.write_all(req.as_bytes()).ok()?;
     s.flush().ok()?;
 
-    let reader = BufReader::new(s);
-    let mut lines = Vec::new();
-    let mut tail = String::new();
-    for l in reader.lines() {
-        let l = l.ok()?;
-        if let Some(rest) = l.strip_prefix(EOT as char) {
-            tail = rest.to_string();
-            break;
-        }
-        lines.push(l);
-    }
-    Some((lines, tail))
+    // 一次讀完再切。不能用 lines()：檔名本身可以含換行，而 -0 模式下分隔符
+    // 根本不是換行。EOT 不會出現在路徑裡，用它切出結尾的統計欄位最可靠。
+    let mut buf: Vec<u8> = Vec::new();
+    BufReader::new(s).read_to_end(&mut buf).ok()?;
+    let pos = buf.iter().rposition(|&b| b == EOT)?;
+    let tail = String::from_utf8_lossy(&buf[pos + 1..]).trim().to_string();
+    let items: Vec<Vec<u8>> = buf[..pos]
+        .split(|&b| b == sep)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_vec())
+        .collect();
+    Some((items, tail))
 }
