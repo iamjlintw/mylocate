@@ -1,6 +1,6 @@
 [package]
 name = "mylocate"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "macOS 上的即時檔案搜尋：打字即出結果、索引永遠是新的"
 license = "MIT"
